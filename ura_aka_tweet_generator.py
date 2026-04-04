@@ -7,7 +7,7 @@ import os
 import pandas as pd
 import re
 
-st.set_page_config(page_title="裏垢女子ツイート生成ツール", page_icon="💕", layout="centered")
+st.set_page_config(page_title="裏垢女子ツイート自動生成ツール", page_icon="💕", layout="centered")
 
 st.title("💕 裏垢女子ツイート自動生成ツール")
 st.caption("任意ペルソナ対応・口調指定・フォーマット傾向指定（#禁止・シャドウバン回避強化）")
@@ -70,7 +70,7 @@ with st.sidebar:
     else:
         tone_display = tone_type
     
-    # 新規：フォーマット傾向
+    # フォーマット傾向
     format_options = [
         "デフォルト（ランダム）",
         "自虐スタート型",
@@ -81,9 +81,7 @@ with st.sidebar:
     ]
     format_type = st.selectbox("フォーマット傾向", format_options, index=0)
     
-    # 適用確率
-    apply_prob = st.slider("フォーマット適用確率 (%)", min_value=0, max_value=100, value=25, step=5,
-                           help="例: 25% = 約4個に1個の割合で指定フォーマットを適用")
+    apply_prob = st.slider("フォーマット適用確率 (%)", min_value=0, max_value=100, value=25, step=5)
     
     max_chars = st.slider("最大文字数", min_value=10, max_value=280, value=140, step=10)
     
@@ -95,17 +93,24 @@ with st.sidebar:
 def generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob):
     explicit_desc = {1: "控えめ自虐", 2: "軽い欲求アピール", 3: "自然なバランス", 4: "やや積極的", 5: "大胆エロティック"}
     
-    # フォーマット適用判定（確率）
     use_format = random.random() * 100 < apply_prob
+    
+    # 口調に応じた絵文字ルール（熟女系などは♡を完全に禁止）
+    mature_tones = ["熟女系", "お姉さん系", "ドS系", "クール系"]
+    if tone_display in mature_tones or (tone_display == "カスタム" and any(t in tone_display for t in mature_tones)):
+        emoji_rule = "**絵文字について：ハート♡や可愛らしい絵文字は一切使用しないでください。熟女らしい落ち着いた表現に徹してください。**"
+    else:
+        emoji_rule = "**絵文字について：ハート♡は過剰に使用せず、1ツイートに0〜1個程度に制限してください。**"
     
     system_prompt = (
         "あなたはTwitter/Xの裏垢女子専門ツイート生成AIです。\n"
-        "自然な日本語、柔らかい口調、適度な絵文字を使用。\n"
+        "自然な日本語、柔らかい口調を使用。\n"
         "ハッシュタグは一切禁止。\n"
         f"**口調タイプ**: {tone_display}（この口調を徹底してください）\n"
         f"**フォーマット傾向**: {'指定されたフォーマットを適用' if use_format else '通常'}（{format_type}）\n"
         "指定されたキャラクター特徴と口調を正確に反映し、『会いたい』『DM待ってる』などの欲求を自然に織り交ぜてください。\n"
         "**重要：Xのシャドウバン回避のため、露骨な性的単語は一切使用しない。**\n"
+        f"{emoji_rule}\n"
         "生成するツイートは厳密に{max_chars}文字以内に収めてください。\n"
         "改行は自然な文の区切りで1〜2箇所程度に留めてください。\n"
         "参考アカウントの最新投稿は書きっぷり（口調・改行・ニュアンス）のみ参考にし、完全にオリジナルで生成してください。パクリは厳禁です。\n"
@@ -170,4 +175,4 @@ if st.session_state.generated_history:
             st.text(tweet)
             st.caption(f"{len(tweet)}文字")
 
-st.caption("※ 19アカウントの最新投稿を毎回参考に分析して生成しています（パクリ厳禁）。フォーマットは指定確率で適用されます。")
+st.caption("※ 19アカウントの最新投稿を毎回参考に分析して生成しています（パクリ厳禁）。熟女系・お姉さん系・ドS系・クール系では♡を完全に禁止しました。")
