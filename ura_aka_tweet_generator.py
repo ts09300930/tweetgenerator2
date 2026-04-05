@@ -10,7 +10,7 @@ import re
 st.set_page_config(page_title="裏垢女子ツイート自動生成ツール", page_icon="💕", layout="centered")
 
 st.title("💕 裏垢女子ツイート自動生成ツール")
-st.caption("ペルソナプリセット保存・強力重複防止・季節/時間表現完全排除")
+st.caption("過激さレベル強化版・ペルソナプリセット保存・強力重複防止")
 
 # ==================== プリセット保存設定 ====================
 DATA_DIR = "data"
@@ -83,7 +83,6 @@ with st.sidebar:
         else:
             st.warning("プリセット名を入力してください")
 
-    # 口調・フォーマット
     tone_options = ["熟女系", "ギャル系", "清楚系", "ドS系", "女子大生風", "不思議ちゃん系", "甘えん坊系", "クール系", "おっとり系", "元気系", "病み系", "ツンデレ系", "お姉さん系", "妹系", "カスタム"]
     tone_type = st.selectbox("口調タイプ", tone_options, index=2)
     tone_display = st.text_input("カスタム口調", value="清楚で甘えん坊な感じ") if tone_type == "カスタム" else tone_type
@@ -93,12 +92,25 @@ with st.sidebar:
     apply_prob = st.slider("フォーマット適用確率 (%)", 0, 100, 25, step=5)
 
     max_chars = st.slider("最大文字数", 10, 280, 140, step=10)
-    explicit_level = st.slider("過激さレベル", 1, 5, 3, step=1)
+    
+    # 過激さレベル（ここを強化）
+    explicit_level = st.slider("過激さレベル", 1, 5, 3, step=1,
+                               help="1: 控えめ自虐　5: 大胆（ソフトエロティック）")
+
     num_tweets = st.number_input("生成件数", 1, 30, 1, step=1)
 
-# ==================== 生成ロジック（重複防止を大幅強化） ====================
+# ==================== 生成ロジック ====================
 def generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, current_batch):
     all_history = st.session_state.generated_history + current_batch
+    
+    # 過激さレベルごとの明確なガイド（ここを大幅強化）
+    level_guide = {
+        1: "控えめで自虐的。甘えを優しく、欲求は遠回しに表現",
+        2: "少し欲求を匂わせる程度。ソフトで可愛らしい表現",
+        3: "自然なバランス。欲求を自然に織り交ぜる",
+        4: "やや積極的。触って・感じちゃうなどのソフトなエロティック表現OK",
+        5: "大胆だがシャドウバン回避を厳守。触って・可愛がって・感じちゃうなどのソフトエロティック表現を積極的に使用"
+    }
     
     mature_tones = ["熟女系", "お姉さん系", "ドS系", "クール系"]
     emoji_rule = "ハート♡や可愛らしい絵文字は一切使用しない" if tone_display in mature_tones else "ハート♡は1ツイートに0〜1個程度に制限"
@@ -108,68 +120,48 @@ def generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, f
         "自然な日本語、柔らかい口調を使用。\n"
         "ハッシュタグ禁止。\n"
         f"口調タイプ: {tone_display}\n"
+        f"過激さレベル: {explicit_level}（{level_guide[explicit_level]}）←この指示を厳密に守ってください\n"
         f"フォーマット傾向: {format_type}\n"
         f"絵文字ルール: {emoji_rule}\n"
         "指定されたキャラクター特徴を正確に反映。\n"
-        "露骨な性的単語は一切使用しない。\n"
+        "露骨な性的単語（セックス、フェラ、マンコ、チンポなど）は一切使用しない。\n"
         "季節・曜日・時間帯・天気・特定の日の表現は一切含めない。\n"
         "生成するツイートは厳密に{max_chars}文字以内。\n"
         "改行は自然に1〜2箇所程度。\n"
         "完全にオリジナルで生成してください。"
     )
     
-    user_prompt = f"キャラクター特徴: {persona}\n過激さレベル: {explicit_level}\n最大文字数: 厳密に{max_chars}文字以内\n参考アカウント: {', '.join(REFERENCE_ACCOUNTS)}\n全く新しい1件のツイートを生成してください。"
+    user_prompt = f"キャラクター特徴: {persona}\n過激さレベル: {explicit_level}（{level_guide[explicit_level]}）\n最大文字数: 厳密に{max_chars}文字以内\n参考アカウント: {', '.join(REFERENCE_ACCOUNTS)}\n全く新しい1件のツイートを生成してください。"
     
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     
-    for attempt in range(10):  # 最大10回まで再生成
+    for _ in range(10):
         tweet = call_grok_api(messages)
         if len(tweet) > max_chars:
             tweet = tweet[:max_chars]
         tweet = re.sub(r'\n{2,}', '\n', tweet.strip())
         
-        # 重複チェック（過去全履歴 + 今回バッチ内）
         similarities = [difflib.SequenceMatcher(None, tweet, past).ratio() for past in all_history]
-        max_sim = max(similarities) if similarities else 0
-        
-        if max_sim < 0.75:  # 75%未満ならOK
-            return tweet, max_sim * 100
-    
-    # 最終的にどうしても重複する場合はそのまま返す（稀）
-    return tweet[:max_chars], max_sim * 100
+        if not similarities or max(similarities) < 0.75:
+            return tweet
+    return tweet[:max_chars]
 
 # ==================== 生成ボタン ====================
 if st.button("🚀 ツイートを生成する", type="primary", use_container_width=True):
     new_tweets = []
     for _ in range(num_tweets):
-        tweet, similarity = generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, new_tweets)
+        tweet = generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, new_tweets)
         new_tweets.append(tweet)
         st.session_state.generated_history.append(tweet)
     
-    st.success(f"{num_tweets}件生成完了（強力重複防止済み）")
+    st.success(f"{num_tweets}件生成完了")
     
     for i, tweet in enumerate(new_tweets, 1):
         st.subheader(f"ツイート {i}（{len(tweet)}文字）")
-        
-        # 類似度表示
-        st.caption(f"📊 過去ツイートとの最高類似度: **{similarity:.1f}%**")
-        
         st.text_area("コピー用", tweet, height=110, key=f"tweet_{i}")
         if st.button("📋 コピー", key=f"copy_{i}"):
             st.code(tweet, language=None)
             st.toast("クリップボードにコピーしました！", icon="✅")
-        
-        # X風プレビュー
-        st.markdown(f"""
-        <div style="border:1px solid #333;border-radius:12px;padding:12px;background:#000;color:#fff;margin:8px 0;">
-            <div style="display:flex;align-items:center;gap:8px;">
-                <div style="width:40px;height:40px;border-radius:50%;background:#1DA1F2;display:flex;align-items:center;justify-content:center;font-size:20px;">👩</div>
-                <div><strong>裏垢女子</strong> <span style="color:#888">@ura_aka_{random.randint(1000,9999)}</span><br><span style="color:#888;font-size:13px;">いま</span></div>
-            </div>
-            <div style="margin:12px 0;line-height:1.4;white-space:pre-wrap;">{tweet}</div>
-            <div style="display:flex;justify-content:space-between;color:#888;font-size:13px;"><span>♡ 12</span><span>🔁 3</span><span>💬 2</span></div>
-        </div>
-        """, unsafe_allow_html=True)
 
 # ==================== 履歴 ====================
 if st.session_state.generated_history:
@@ -178,4 +170,4 @@ if st.session_state.generated_history:
             st.text(tweet)
             st.caption(f"{len(tweet)}文字")
 
-st.caption("※ 類似度75%以上なら自動で作り直すように強化しました。")
+st.caption("※ 過激さレベル1と5で明確に差が出るよう強化しました。")
