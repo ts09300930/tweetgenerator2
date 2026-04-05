@@ -1,0 +1,3 @@
+# 個人データはGitHubに上げない
+data/
+.streamlit/secrets.toml
