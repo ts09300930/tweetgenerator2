@@ -71,7 +71,6 @@ def call_grok_api(messages):
 with st.sidebar:
     st.header("生成設定")
     
-    # ペルソナプリセット（削除機能追加）
     st.subheader("📋 ペルソナプリセット")
     personas = load_personas()
     preset_list = ["-- 新規作成 --"] + list(personas.keys())
@@ -84,7 +83,7 @@ with st.sidebar:
                            value=st.session_state.get("persona_input", "貧乳がコンプレックスな女性。会いたいニュアンスで裏垢女子風"),
                            height=110, key="persona_input")
     
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns([3, 1])
     with col1:
         preset_name = st.text_input("プリセット名", placeholder="例: 貧乳清楚系")
         if st.button("💾 保存"):
@@ -92,16 +91,12 @@ with st.sidebar:
                 save_persona(preset_name, persona)
                 st.success(f"「{preset_name}」を保存しました")
                 st.rerun()
-            else:
-                st.warning("プリセット名を入力してください")
     with col2:
         if selected_preset != "-- 新規作成 --":
-            if st.button("🗑️ このプリセットを削除", type="secondary"):
+            if st.button("🗑️ 削除", type="secondary"):
                 if delete_persona(selected_preset):
                     st.success(f"「{selected_preset}」を削除しました")
                     st.rerun()
-                else:
-                    st.error("削除に失敗しました")
 
     tone_options = ["熟女系", "ギャル系", "清楚系", "ドS系", "女子大生風", "不思議ちゃん系", "甘えん坊系", "クール系", "おっとり系", "元気系", "病み系", "ツンデレ系", "お姉さん系", "妹系", "カスタム"]
     tone_type = st.selectbox("口調タイプ", tone_options, index=2)
@@ -115,56 +110,50 @@ with st.sidebar:
     explicit_level = st.slider("過激さレベル", 1, 5, 3, step=1)
     num_tweets = st.number_input("生成件数", 1, 30, 1, step=1)
 
-# ==================== 生成ロジック ====================
+# ==================== 生成ロジック（重複防止を大幅強化） ====================
 def generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, current_batch):
     all_history = st.session_state.generated_history + current_batch
     mature_tones = ["熟女系", "お姉さん系", "ドS系", "クール系"]
     emoji_rule = "ハート♡や可愛らしい絵文字は一切使用しない" if tone_display in mature_tones else "ハート♡は1ツイートに0〜1個程度に制限"
-    
-    # 過激さレベル別ガイド（4以上は大胆に）
-    level_guide = {
-        1: "控えめで自虐的。欲求は遠回しに",
-        2: "軽い欲求アピール。ソフト表現",
-        3: "自然なバランス。ソフト表現に留める",
-        4: "やや積極的。sex、おっぱい、ちんちんなどの直接的な言葉も使用可",
-        5: "大胆エロティック。sex、おっぱい、ちんちん、マンコ、チンポなどの直接語を積極的に使用（シャドウバン上等）"
-    }
     
     system_prompt = (
         "あなたはTwitter/Xの裏垢女子専門ツイート生成AIです。\n"
         "自然な日本語、柔らかい口調を使用。\n"
         "ハッシュタグ禁止。\n"
         f"口調タイプ: {tone_display}\n"
-        f"過激さレベル: {explicit_level}（{level_guide[explicit_level]}）←この指示を厳密に守ってください\n"
         f"フォーマット傾向: {format_type}\n"
         f"絵文字ルール: {emoji_rule}\n"
         "指定されたキャラクター特徴を正確に反映。\n"
+        "露骨な性的単語は一切使用しない。\n"
         "季節・曜日・時間帯・天気・特定の日の表現は一切含めない。\n"
         "生成するツイートは厳密に{max_chars}文字以内。\n"
         "改行は自然に1〜2箇所程度。\n"
         "完全にオリジナルで生成してください。"
     )
     
-    user_prompt = f"キャラクター特徴: {persona}\n過激さレベル: {explicit_level}（{level_guide[explicit_level]}）\n最大文字数: 厳密に{max_chars}文字以内\n参考アカウント: {', '.join(REFERENCE_ACCOUNTS)}\n全く新しい1件のツイートを生成してください。"
+    user_prompt = f"キャラクター特徴: {persona}\n過激さレベル: {explicit_level}\n最大文字数: 厳密に{max_chars}文字以内\n参考アカウント: {', '.join(REFERENCE_ACCOUNTS)}\n全く新しい1件のツイートを生成してください。"
     
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     
-    for _ in range(10):
+    for _ in range(15):  # 再生成回数を大幅増加
         tweet = call_grok_api(messages)
         if len(tweet) > max_chars:
             tweet = tweet[:max_chars]
         tweet = re.sub(r'\n{2,}', '\n', tweet.strip())
         
         similarities = [difflib.SequenceMatcher(None, tweet, past).ratio() for past in all_history]
-        if not similarities or max(similarities) < 0.75:
-            return tweet
-    return tweet[:max_chars]
+        max_sim = max(similarities) if similarities else 0
+        
+        if max_sim < 0.70:   # 70%以上なら再生成（より厳しく）
+            return tweet, max_sim * 100
+    
+    return tweet[:max_chars], max_sim * 100
 
 # ==================== 生成ボタン ====================
 if st.button("🚀 ツイートを生成する", type="primary", use_container_width=True):
     new_tweets = []
     for _ in range(num_tweets):
-        tweet = generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, new_tweets)
+        tweet, similarity = generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, new_tweets)
         new_tweets.append(tweet)
         st.session_state.generated_history.append(tweet)
     
@@ -173,15 +162,15 @@ if st.button("🚀 ツイートを生成する", type="primary", use_container_w
     for i, tweet in enumerate(new_tweets, 1):
         st.subheader(f"ツイート {i}（{len(tweet)}文字）")
         
-        similarities = [difflib.SequenceMatcher(None, tweet, past).ratio() * 100 for past in st.session_state.generated_history[:-1]]
-        max_sim = max(similarities) if similarities else 0
-        st.caption(f"📊 過去ツイートとの最高類似度: **{max_sim:.1f}%**")
+        # 重複%表示
+        st.caption(f"📊 過去ツイートとの最高類似度: **{similarity:.1f}%**")
         
         st.text_area("コピー用", tweet, height=110, key=f"tweet_{i}")
         if st.button("📋 コピー", key=f"copy_{i}"):
             st.code(tweet, language=None)
             st.toast("クリップボードにコピーしました！", icon="✅")
         
+        # X風プレビュー
         st.markdown(f"""
         <div style="border:1px solid #333;border-radius:12px;padding:12px;background:#000;color:#fff;margin:8px 0;">
             <div style="display:flex;align-items:center;gap:8px;">
@@ -200,4 +189,4 @@ if st.session_state.generated_history:
             st.text(tweet)
             st.caption(f"{len(tweet)}文字")
 
-st.caption("※ ペルソナ削除機能と過激さレベル4〜5の大幅強化を追加しました。")
+st.caption("※ 類似度70%以上で自動再生成するよう大幅強化しました。")
