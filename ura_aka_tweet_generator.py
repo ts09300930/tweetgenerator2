@@ -62,7 +62,7 @@ def call_grok_api(messages):
 with st.sidebar:
     st.header("生成設定")
     
-    # ペルソナプリセット（修正済み）
+    # ペルソナプリセット（即反映）
     st.subheader("📋 ペルソナプリセット")
     personas = load_personas()
     preset_list = ["-- 新規作成 --"] + list(personas.keys())
@@ -95,7 +95,7 @@ with st.sidebar:
     explicit_level = st.slider("過激さレベル", 1, 5, 3, step=1)
     num_tweets = st.number_input("生成件数", 1, 30, 1, step=1)
 
-# ==================== 生成ロジック ====================
+# ==================== 生成ロジック（重複防止強化版） ====================
 def generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, current_batch):
     all_history = st.session_state.generated_history + current_batch
     mature_tones = ["熟女系", "お姉さん系", "ドS系", "クール系"]
@@ -120,22 +120,27 @@ def generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, f
     
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     
-    for _ in range(10):
+    for attempt in range(10):  # 最大10回まで再生成
         tweet = call_grok_api(messages)
         if len(tweet) > max_chars:
             tweet = tweet[:max_chars]
         tweet = re.sub(r'\n{2,}', '\n', tweet.strip())
         
+        # 重複チェック（過去全履歴＋今回バッチ内）
         similarities = [difflib.SequenceMatcher(None, tweet, past).ratio() for past in all_history]
-        if not similarities or max(similarities) < 0.75:
-            return tweet
-    return tweet[:max_chars]
+        max_sim = max(similarities) if similarities else 0
+        
+        if max_sim < 0.75:  # 75%以上なら再生成
+            return tweet, max_sim * 100
+    
+    # 最終的にどうしても重複する場合はそのまま返す
+    return tweet[:max_chars], max_sim * 100
 
 # ==================== 生成ボタン ====================
 if st.button("🚀 ツイートを生成する", type="primary", use_container_width=True):
     new_tweets = []
     for _ in range(num_tweets):
-        tweet = generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, new_tweets)
+        tweet, similarity = generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, new_tweets)
         new_tweets.append(tweet)
         st.session_state.generated_history.append(tweet)
     
@@ -144,10 +149,8 @@ if st.button("🚀 ツイートを生成する", type="primary", use_container_w
     for i, tweet in enumerate(new_tweets, 1):
         st.subheader(f"ツイート {i}（{len(tweet)}文字）")
         
-        # 重複%表示（復活）
-        similarities = [difflib.SequenceMatcher(None, tweet, past).ratio() * 100 for past in st.session_state.generated_history[:-1]]
-        max_sim = max(similarities) if similarities else 0
-        st.caption(f"📊 過去ツイートとの最高類似度: **{max_sim:.1f}%**")
+        # 重複%表示（復活・強化）
+        st.caption(f"📊 過去ツイートとの最高類似度: **{similarity:.1f}%**")
         
         st.text_area("コピー用", tweet, height=110, key=f"tweet_{i}")
         if st.button("📋 コピー", key=f"copy_{i}"):
@@ -173,4 +176,4 @@ if st.session_state.generated_history:
             st.text(tweet)
             st.caption(f"{len(tweet)}文字")
 
-st.caption("※ 重複%表示とX風プレビューを復活させました。")
+st.caption("※ 類似度75%以上で自動再生成するよう強化しました。")
