@@ -10,7 +10,7 @@ import re
 st.set_page_config(page_title="裏垢女子ツイート自動生成ツール", page_icon="💕", layout="centered")
 
 st.title("💕 裏垢女子ツイート自動生成ツール")
-st.caption("ペルソナプリセット保存・バッチ内重複防止・季節/時間表現完全排除")
+st.caption("ペルソナプリセット保存・強力重複防止・季節/時間表現完全排除")
 
 # ==================== プリセット保存設定 ====================
 DATA_DIR = "data"
@@ -62,7 +62,7 @@ def call_grok_api(messages):
 with st.sidebar:
     st.header("生成設定")
     
-    # === ペルソナプリセット ===
+    # ペルソナプリセット
     st.subheader("📋 ペルソナプリセット")
     personas = load_personas()
     preset_list = ["-- 新規作成 --"] + list(personas.keys())
@@ -83,7 +83,7 @@ with st.sidebar:
         else:
             st.warning("プリセット名を入力してください")
 
-    # 口調・フォーマット（従来通り）
+    # 口調・フォーマット
     tone_options = ["熟女系", "ギャル系", "清楚系", "ドS系", "女子大生風", "不思議ちゃん系", "甘えん坊系", "クール系", "おっとり系", "元気系", "病み系", "ツンデレ系", "お姉さん系", "妹系", "カスタム"]
     tone_type = st.selectbox("口調タイプ", tone_options, index=2)
     tone_display = st.text_input("カスタム口調", value="清楚で甘えん坊な感じ") if tone_type == "カスタム" else tone_type
@@ -96,9 +96,8 @@ with st.sidebar:
     explicit_level = st.slider("過激さレベル", 1, 5, 3, step=1)
     num_tweets = st.number_input("生成件数", 1, 30, 1, step=1)
 
-# ==================== 生成ロジック（バッチ内重複防止強化） ====================
+# ==================== 生成ロジック（重複防止を大幅強化） ====================
 def generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, current_batch):
-    # バッチ内も含めた全履歴で重複チェック
     all_history = st.session_state.generated_history + current_batch
     
     mature_tones = ["熟女系", "お姉さん系", "ドS系", "クール系"]
@@ -123,35 +122,37 @@ def generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, f
     
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     
-    for _ in range(4):  # 再生成回数増加
+    for attempt in range(10):  # 最大10回まで再生成
         tweet = call_grok_api(messages)
         if len(tweet) > max_chars:
             tweet = tweet[:max_chars]
         tweet = re.sub(r'\n{2,}', '\n', tweet.strip())
         
-        # バッチ内含む全履歴との重複チェック
+        # 重複チェック（過去全履歴 + 今回バッチ内）
         similarities = [difflib.SequenceMatcher(None, tweet, past).ratio() for past in all_history]
-        if not similarities or max(similarities) < 0.75:
-            return tweet
-    return tweet[:max_chars]
+        max_sim = max(similarities) if similarities else 0
+        
+        if max_sim < 0.75:  # 75%未満ならOK
+            return tweet, max_sim * 100
+    
+    # 最終的にどうしても重複する場合はそのまま返す（稀）
+    return tweet[:max_chars], max_sim * 100
 
 # ==================== 生成ボタン ====================
 if st.button("🚀 ツイートを生成する", type="primary", use_container_width=True):
     new_tweets = []
     for _ in range(num_tweets):
-        tweet = generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, new_tweets)
+        tweet, similarity = generate_tweet_with_grok(persona, max_chars, explicit_level, tone_display, format_type, apply_prob, new_tweets)
         new_tweets.append(tweet)
         st.session_state.generated_history.append(tweet)
     
-    st.success(f"{num_tweets}件生成完了（バッチ内重複防止済み）")
+    st.success(f"{num_tweets}件生成完了（強力重複防止済み）")
     
     for i, tweet in enumerate(new_tweets, 1):
         st.subheader(f"ツイート {i}（{len(tweet)}文字）")
         
-        # 自動類似度分析
-        similarities = [difflib.SequenceMatcher(None, tweet, past).ratio() * 100 for past in st.session_state.generated_history[:-1]]
-        max_sim = max(similarities) if similarities else 0
-        st.caption(f"📊 過去ツイートとの最高類似度: **{max_sim:.1f}%**")
+        # 類似度表示
+        st.caption(f"📊 過去ツイートとの最高類似度: **{similarity:.1f}%**")
         
         st.text_area("コピー用", tweet, height=110, key=f"tweet_{i}")
         if st.button("📋 コピー", key=f"copy_{i}"):
@@ -177,4 +178,4 @@ if st.session_state.generated_history:
             st.text(tweet)
             st.caption(f"{len(tweet)}文字")
 
-st.caption("※ ペルソナはdata/personas.jsonに保存されます。再起動後も残ります。バッチ内重複も防止しています。")
+st.caption("※ 類似度75%以上なら自動で作り直すように強化しました。")
